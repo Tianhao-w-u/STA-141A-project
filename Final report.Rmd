@@ -970,7 +970,7 @@ num_classes <- length(levels(filtered_test_data$feedback_type))
        col = "blue", lwd = 2)
   print(paste("AUC (Sessions 1 and 2):", round(filtered_auc_value, 4)))
 ```
-The test accuracy is 0.8%(The model correctly predicts the class in 80% of cases.), which is a good improvement of our model. The AUC is 0.9234, which indicates that the model has strong ability to predict the values of feedback_type.
+The test accuracy is 0.8 (ie.The model correctly predicts the class in 80% of cases.), which is a good improvement of our model. The AUC is 0.9234, which indicates that the model has strong ability to predict the values of feedback_type.
 
 
 
