@@ -1,0 +1,1170 @@
+---
+title: "Final report"
+author: "Tianhao Wu"
+date: "2025-03-15"
+output: html_document
+---
+
+# Abstract
+Our goal for this project is to find out which predictors are important for predicting the feedback of mice. In this report, I will explore each variable's meanings and figure out the data structures. Also, I will find out the relationships between some variables corresponding to each feedback type to extract the variable features. Then, I will combine those featured variable(correlated with feedbacktype) as a integrated dataframe and filter out unnecessary predictors with cross-validation. Finally, we create the high-performanced predictive model with high accuracy, proving that it has excellent capabilities in prediction.
+
+# introduction:
+In this project, we analyze a portion of data collected by Steinmetz et al. (2019). While this file(session.zip) provides a brief structure of the experiments, referring to the original studies will help me obtain a deeper understanding and improve my quality of the analysis.
+The study involved 10 mice over 39 experimental sessions. In each session, the mice completed several hundred different trials where visual stimuli appeared on two screens, one on each side, and the stimuli had different contrast levels: 0 (no stimulus), 0.25, 0.5, and 1. The mice will use a wheel controlled by their forepaws to respond to the stimuli. Based on their decisions, they will receive either a reward (for correct choices) or a penalty (for incorrect ones).
+The rules for correct choices were:
+ a)If the left contrast was higher than the right, the response is turning the wheel to the right.
+ b)If the right contrast was higher than the left, the response is turning the wheel to the left.
+ c)If no stimulus appeared on either side (both contrasts were 0), the response is to keep the wheel still.
+ d)If both contrasts are equal but non-zero, the response is randomly assigned (ie.50% left, 50% right).
+During each trial, the activity of neuron activity in the mice’s was recorded in the form of spike trains. So, in this project, I’ll focus on the the feature of variable(such as: neural activities with respect to time). The data was from 1st session(Sessions 1–18) involving four mice: Cori(1st session), Frossman, Hence, and Lederberg.
+
+
+
+## Data structure 
+
+---
+
+A total of 18 RDS files are provided that contain the records from 18 sessions. In each RDS file, you can find the name of mouse from `mouse_name` and date of the experiment from `date_exp`. 
+
+
+```{r echo=TRUE, eval=TRUE}
+session=list()
+session <- lapply(1:18, function(i) {
+  readRDS(paste("C:\\Users\\Administrator\\Desktop\\STA 141 A retake\\project\\sessions\\session", i, '.rds', sep = ''))
+})
+```
+
+
+Take the 11th trial in Session 5 for example, we can see that the left contrast for this trial is `r 
+session[[5]]$contrast_left[11]`  the right contrast is `r 
+session[[5]]$contrast_right[11]`, and the feedback (i.e., outcome) of the trial is `r session[[5]]$feedback_type[11]`. There are a total of `r length(session[[5]]$brain_area)` neurons in this trial from `r length(unique(session[[5]]$brain_area))` areas of the brain. The spike trains of these neurons are stored in `session[[5]]$spks[[11]]` which is a `r dim(session[[5]]$spks[[11]])[1]` by `r dim(session[[5]]$spks[[11]])[2]` matrix with each entry being the number of spikes of one neuron (i.e., row) in each time bin (i.e., column).
+```{r}
+session[[5]]$contrast_left[11] 
+session[[5]]$contrast_right[11]
+session[[5]]$feedback_type[11]
+```
+
+# Question of interest
+The primary objective of this project is to build a predictive model to predict the outcome (i.e., feedback type) of each trial using the neural activity data (i.e., spike trains in `spks`), along with the stimuli (the left and right contrasts). Given the complexity of the data (and that this is a course project), we break the predictive modeling into three parts as follows. 
+
+## Part 1. Exploratory data analysis. 
+
+In this part, we will explore the features of the data sets in order to build our prediction model. In particular, we would like choose the  first session to observe the data structure to figure out what each variable means.
+
+### Display the variable informations throughout each session
+```{r}
+names(session[[1]])
+```
+Five variables are available for each trial, namely 
+
+- `feedback_type`: type of the feedback, 1 for success and -1 for failure
+- `contrast_left`: contrast of the left stimulus
+- `contrast_right`: contrast of the right stimulus
+- `time`: centers of the time bins for `spks`  
+- `spks`: numbers of spikes of neurons in the visual cortex in time bins defined in `time`
+- `brain_area`: area of the brain where each neuron lives
+
+
+
+
+### number of neurons/trails in the first session 
+```{r}
+
+length(session[[1]]$spks)
+```
+### the number of trail of session 1 is 114
+```{r}
+
+length(session[[1]]$contrast_left)
+length(session[[1]]$contrast_right)
+```
+### extract feedback type information in first session
+```{r}
+Session1_report<-data.frame(Contrast_left=session[[1]]$contrast_left,Contrast_right=session[[1]]$contrast_right,Feedback=session[[1]]$feedback_type)
+Session1_report$Feedback<-ifelse(Session1_report$Feedback==1,"success","failure")
+Session1_report$result<-ifelse(Session1_report$Feedback=="success","right","left")
+unique(Session1_report$Feedback)
+```
+
+
+## Make summary output for all information of mice in first session
+```{r, echo=FALSE, message=FALSE,warning=FALSE}
+Session1_report<-data.frame(Contrast_left=session[[1]]$contrast_left,Contrast_right=session[[1]]$contrast_right,Feedback=session[[1]]$feedback_type)
+Session1_report$Feedback<-ifelse(Session1_report$Feedback==1,"success","failure")
+
+#filter out what the experiment results in detail in the result column
+for (num in 1:114){
+  right<- session[[1]]$contrast_right[num]
+  left<-session[[1]]$contrast_left[num]
+  feedback<-session[[1]]$feedback_type[num]
+  if(right ==left){
+     if(right==0){
+       if(feedback==1){
+         Session1_report$result[num]<-"still"
+       }else{
+        Session1_report$result[num]<-"otherwise"}}
+    else{
+      if(feedback==1){
+         Session1_report$result[num]<-"random success by 50%"
+      }else{
+         Session1_report$result[num]<-"random failure by 50%"
+      }
+     }
+  }
+  else{
+    if (right>left) {
+      if(feedback==1){
+         Session1_report$result[num]<-"left"
+       }else{
+        Session1_report$result[num]<-"otherwise"}}
+    if (right<left) {
+      if(feedback==1){
+         Session1_report$result[num]<-"right"
+       }else{
+        Session1_report$result[num]<-"otherwise"}}
+  }
+}
+
+head(Session1_report)
+```
+
+a)If the left contrast was higher than the right, the response is turning the wheel to the right(ie. result is right).
+b)If the right contrast was higher than the left, the response is turning the wheel to the left(ie. result is left).
+c)If no stimulus appeared on either side (both contrasts were 0), the response is to keep the wheel still(ie. result is still).
+d)If both contrasts are equal but non-zero, the response is randomly assigned (ie.50% left, 50% right, result is otherwise).
+
+
+## Session 1 Data Analysis
+In the first session, the mice name is the Cori. We are going to explore the information variable and their structures.
+
+### The name of each brain area in first session
+```{r}
+#for each session, the mice has different simulation of the brain area
+unique(session[[1]]$brain_area)
+```
+
+### The dimention of the brain area, the time for the first trail, the spikes of the first trail
+```{r}
+length(session[[1]]$brain_area)#the stimuli of brain area for each trail
+length(session[[1]]$time[[1]])#the time bins for each trail
+dim(session[[1]]$spks[[1]])#the number of neurons in each time bin for each trail
+```
+Since the dimention of the spike is the same as the brain_area x matrix, we conclude the spike matrix is the summary of the number in each brain area for the first trail with 40 time bins.
+
+
+
+
+### Make a summary result of each frequency of brain area in first trail of the first session
+```{r, echo=FALSE, message=FALSE,warning=FALSE}
+library(dplyr)
+library(ggplot2)
+#session[[1]]$spks[[1]]
+
+rowsum<-rowSums(session[[1]]$spks[[1]])#total number of neurons in each brain_area in the first trail
+columnsum<-colSums(session[[1]]$spks[[1]])#number of neurons in each time bin
+brain_area<-session[[1]]$brain_area
+session1_summary<-tapply(rowsum,brain_area,sum)
+df <- data.frame(Brain_Area = names(session1_summary), Neuron_Count = session1_summary)
+
+# Plot the histogram
+plt1<-ggplot(df, aes(x = Brain_Area, y = Neuron_Count)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  theme_minimal() +
+  labs(title = "Brain area Cori feedback=1",
+       x = "Brain Area",
+       y = "Neuron Count") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+
+```{r, echo=FALSE, message=FALSE,warning=FALSE}
+time_series<- session[[1]]$time[[1]]
+# Assuming time_series and columnsum are vectors of the same length
+df <- data.frame(Time = time_series, Number = columnsum)
+
+# Create the ggplot
+chag1 <- ggplot(df, aes(x = Time, y = Number)) +
+  geom_line(color = "pink") +   # Line plot
+  geom_point(color = "pink") +  # Points (to mimic "type = 'o'")
+  labs(x = "Time", y = "Number", title = "Changes Neurons Cori feedback=1") +
+  theme_minimal()  # Optional theme for better appearance
+
+#Extract information of Forssmann at the first trail of the first session 
+rowsum<-rowSums(session[[4]]$spks[[1]])#total number of neurons in each brain_area in the first trail
+columnsum<-colSums(session[[4]]$spks[[1]])#number of neurons in each time bin
+brain_area<-session[[4]]$brain_area
+session4_summary<-tapply(rowsum,brain_area,sum)
+df2 <- data.frame(Brain_Area = names(session4_summary), Neuron_Count = session4_summary)
+time_series<- session[[4]]$time[[1]]
+# Plot the histogram
+plt2<-ggplot(df2, aes(x = Brain_Area, y = Neuron_Count)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  theme_minimal() +
+  labs(title = "Brain Area Forssmann feedback=1",
+       x = "Brain Area",
+       y = "Neuron Count") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+##display all plots
+# Assuming time_series and columnsum are vectors of the same length
+df2 <- data.frame(Time = time_series, Number = columnsum)
+
+# Create the ggplot
+chag2 <- ggplot(df2, aes(x = Time, y = Number)) +
+  geom_line(color = "pink") +   # Line plot
+  geom_point(color = "pink") +  # Points (to mimic "type = 'o'")
+  labs(x = "Time", y = "Number", title = "Changes Neurons Forssmann feedback=1") +
+  theme_minimal()  # Optional theme for better appearance
+
+
+```
+
+
+```{r, message=FALSE,warning=FALSE}
+library(gridExtra)
+grid.arrange(plt1, plt2,chag1,chag2, nrow=2, ncol = 2)
+```
+
+
+-The difference of Neurons change between Mice in the histogram, they explains the frequency of each brain area appears in the first trail of the first session for each mice
+
+-In the line plot, they explains the changes of neurons in over time for each mice. In the histogram, they explains the frequency of each brain area appears in the first trail of the first session for each mice
+
+
+
+
+### changes Neurons Across feedback type
+```{r, echo=FALSE, message=FALSE,warning=FALSE}
+#extract the data
+rowsum<-rowSums(session[[1]]$spks[[3]])#total number of neurons in each brain_area in the first trail
+columnsum<-colSums(session[[1]]$spks[[3]])#number of neurons in each time bin
+brain_area<-session[[1]]$brain_area
+session1_summary<-tapply(rowsum,brain_area,sum)
+df <- data.frame(Brain_Area = names(session1_summary), Neuron_Count = session1_summary)
+# Plot the histogram
+plt3<-ggplot(df, aes(x = Brain_Area, y = Neuron_Count)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  theme_minimal() +
+  labs(title = "Brain area Cori feedback=-1",
+       x = "Brain Area",
+       y = "Neuron Count") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+time_series<- session[[1]]$time[[3]]
+# Assuming time_series and columnsum are vectors of the same length
+df <- data.frame(Time = time_series, Number = columnsum)
+
+# Create the ggplot
+chag3 <- ggplot(df, aes(x = Time, y = Number)) +
+  geom_line(color = "pink") +   # Line plot
+  geom_point(color = "pink") +  # Points (to mimic "type = 'o'")
+  labs(x = "Time", y = "Number", title = "Changes Neurons Cori Feedback=-1") +
+  theme_minimal()  # Optional theme for better appearance
+
+grid.arrange(plt1,chag1,plt3,chag3, nrow=2, ncol = 2)
+```
+
+It seems that the brain area may not affect the cori's feedback type in this sestion, however, the changes of neuron is different between feedback type 1 and -1, which means the neuron activity may be a factor influence feedback type, so we need Time series analysis next.
+
+
+### changes in success rate for each mice
+```{r, echo=FALSE, message=FALSE,warning=FALSE}
+#display the success and failure rate of the first trail
+session_summary=data.frame()
+#colnames(session_summary)<-c("success","failure")
+for (i in 1:18){
+  bind<-table(session[[i]]$feedback_type)
+  count<-sum(bind)
+  session_summary<-rbind(session_summary,bind)
+  
+ # session_summary<-cbind(session_summary,count)
+}
+colnames(session_summary)<-c("success","failure")
+session_summary$names<-c("1","2","3","4","5","6","7","8","9","10","11","12","13","14","15","16","17","18")
+for(i in 1:18){
+  bind<-table(session[[i]]$feedback_type)
+  session_summary$count[i]<-sum(bind)
+  session_summary$fraction_success[i]<-session_summary$success[i]/sum(bind)
+  session_summary$fraction_failure[i]<-session_summary$failure[i]/sum(bind)
+}
+```
+
+```{r, echo=FALSE, message=FALSE,warning=FALSE}
+mouse<-c()
+for (i in 1:18){
+  mouse<-append(mouse,session[[i]]$mouse_name)
+}
+session_summary<-session_summary%>%mutate(Mouse=mouse)
+library(ggplot2)
+library(dplyr)
+
+# Ensure data is sorted by 'names' in increasing order
+df <- session_summary %>% arrange(names)
+
+# Convert 'names' to numeric (if not already)
+df$names <- as.numeric(df$names)
+
+# Create the line plot with separate facets for each Mouse
+ggplot(df, aes(x = names, y = fraction_success, group = Mouse, color = Mouse)) +
+  geom_line() +
+  geom_point() +  # Adds points for visibility
+  labs(x = "Names", y = "Fraction Success", title = "Changes of Success Rate for Each Mouse") +
+  facet_wrap(~Mouse, scales = "free_y") +  # Creates separate plots for each Mouse
+  theme_minimal() +
+  scale_x_continuous(breaks = unique(df$names))  # Ensures x-axis increments properly
+
+
+```
+
+Each Mice has different performance(success rate) across the sessions, which means the success rate of the mice could change over the date.
+
+
+
+### Observe the brain_area change in the first trail of different mice
+```{r, echo=FALSE, message=FALSE,warning=FALSE}
+#the frequency of plot of each brain area in the first session with respect to time
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+#session[[1]]$spks[[1]]
+
+#for Mice Cori first trail
+rowsum<-rowSums(session[[1]]$spks[[1]])#total number of neurons in each brain_area in the first trail
+columnsum<-colSums(session[[1]]$spks[[1]])#number of neurons in each time bin
+brain_area<-session[[1]]$brain_area
+session1_summary<-tapply(rowsum,brain_area,sum)
+matrix<-session[[1]]$spks[[1]]
+#access first row of matrix
+df<-data.frame(brain_area,matrix)
+df_grouped <- df %>%
+  group_by(brain_area) %>%
+  summarise(across(everything(), sum, na.rm = TRUE))
+df_grouped<-pivot_longer(df_grouped,cols=-brain_area, names_to = "time", values_to = "number")
+p1<-df_grouped%>%
+  group_by(time)%>%
+  ggplot(aes(x=brain_area,y=number,fill=brain_area))+
+  geom_boxplot()+
+  ggtitle("Distribution of Number by Brain Area of Cori with feedback=1")+
+  theme_minimal()
+
+
+
+#for Mice Cori first trail with feedback = -1
+rowsum<-rowSums(session[[1]]$spks[[3]])#total number of neurons in each brain_area in the first trail
+columnsum<-colSums(session[[1]]$spks[[3]])#number of neurons in each time bin
+brain_area<-session[[1]]$brain_area
+session1_summary<-tapply(rowsum,brain_area,sum)
+matrix<-session[[1]]$spks[[3]]
+#access first row of matrix
+df<-data.frame(brain_area,matrix)
+df_grouped <- df %>%
+  group_by(brain_area) %>%
+  summarise(across(everything(), sum, na.rm = TRUE))
+df_grouped<-pivot_longer(df_grouped,cols=-brain_area, names_to = "time", values_to = "number")
+p3<-df_grouped%>%
+  group_by(time)%>%
+  ggplot(aes(x=brain_area,y=number,fill=brain_area))+
+  geom_boxplot()+
+  ggtitle("Distribution of Number by Brain Area of Cori with feedback=-1")+
+  theme_minimal()
+
+#for Mice Hench first trail with feedback=1
+rowsum<-rowSums(session[[8]]$spks[[1]])#total number of neurons in each brain_area in the first trail
+columnsum<-colSums(session[[8]]$spks[[1]])#number of neurons in each time bin
+brain_area<-session[[8]]$brain_area
+session1_summary<-tapply(rowsum,brain_area,sum)
+matrix<-session[[8]]$spks[[1]]
+#access first row of matrix
+df<-data.frame(brain_area,matrix)
+df_grouped <- df %>%
+  group_by(brain_area) %>%
+  summarise(across(everything(), sum, na.rm = TRUE))
+df_grouped<-pivot_longer(df_grouped,cols=-brain_area, names_to = "time", values_to = "number")
+p2<-df_grouped%>%
+  group_by(time)%>%
+  ggplot(aes(x=brain_area,y=number,fill=brain_area))+
+  geom_boxplot()+
+  ggtitle("Distribution of Number by Brain Area of Hench with feedback=1")+
+  theme_minimal()
+
+
+
+
+#for Mice Hench first trail with feedback=-1
+rowsum<-rowSums(session[[8]]$spks[[2]])#total number of neurons in each brain_area in the first trail
+columnsum<-colSums(session[[8]]$spks[[2]])#number of neurons in each time bin
+brain_area<-session[[8]]$brain_area
+session1_summary<-tapply(rowsum,brain_area,sum)
+matrix<-session[[8]]$spks[[2]]
+#access first row of matrix
+df<-data.frame(brain_area,matrix)
+df_grouped <- df %>%
+  group_by(brain_area) %>%
+  summarise(across(everything(), sum, na.rm = TRUE))
+df_grouped<-pivot_longer(df_grouped,cols=-brain_area, names_to = "time", values_to = "number")
+p4<-df_grouped%>%
+  group_by(time)%>%
+  ggplot(aes(x=brain_area,y=number,fill=brain_area))+
+  geom_boxplot()+
+  ggtitle("Distribution of Number by Brain Area of Hench with feedback=-1")+
+  theme_minimal()
+p1
+p2
+p3
+p4
+```
+The distribution of brain area is different between mice. Also, the distribution of feedback=1 is different from feedback=-1, meaning the difference of neuron activity could be a factor affecting the feedback type.
+
+
+
+
+## Part 2. Feature extraction
+
+### Brief features I extracted from the whole session data
+```{r, echo=FALSE, message=FALSE,warning=FALSE}
+library(dplyr)
+library(tidyr)
+library(purrr)
+
+
+process_session <- function(session, session_id) {
+  df <- data.frame(
+    contrast_left = session$contrast_left,
+    contrast_right = session$contrast_right,
+    feedback_type = session$feedback_type,
+    session_id = session_id,
+    mouse_name = session$mouse_name,
+    date_exp = session$date_exp
+  )
+  
+  #deal with time data
+  df$time <- sapply(session$time, function(x) ifelse(length(x) > 0, x[1], NA))
+  
+  df$spike_count <- sapply(session$spks, length) 
+  
+  return(df)
+}
+sessions<-session
+sessions_cleaned <- map2(sessions, 1:length(sessions), process_session)
+
+
+df_final <- bind_rows(sessions_cleaned)
+
+
+str(df_final)
+head(df_final)
+
+
+```
+Since the spike count is the same along each trail of the session of the Mice, we need to explore more information about spike_count
+
+
+ 
+
+
+### Boxplot of brain area across all sessions
+```{r, echo=FALSE, message=FALSE,warning=FALSE}
+library(ggplot2)
+library(dplyr)
+
+
+calculate_brain_area_counts <- function(session) {
+  
+  if (!is.list(session$spks)) return(NULL)
+  
+  
+  summed_spikes <- Reduce("+", lapply(session$spks, rowSums))
+  
+
+  df_brain <- data.frame(
+    brain_area = session$brain_area,  
+    appearance_count = summed_spikes  
+  )
+  
+  return(df_brain)
+}
+
+
+session_brain_counts <- lapply(sessions, calculate_brain_area_counts)
+
+
+df_brain_counts <- bind_rows(session_brain_counts, .id = "session_id")
+
+
+df_brain_counts <- df_brain_counts %>%
+  group_by(session_id, brain_area) %>%
+  summarise(appearance_count = sum(appearance_count), .groups = "drop")
+
+# Ensure session_id is treated as a factor and ordered numerically
+# Convert session_id from factor to integer and sort
+df_sorted <- df_brain_counts %>%
+  mutate(session_id = as.integer(as.character(session_id))) %>%  # Convert factor to integer
+  arrange(session_id)  # Sort by session_id
+df_sorted$session_id<-as.factor(df_sorted$session_id)
+# Plot with ordered x-axis
+ggplot(df_sorted, aes(x = session_id, y = appearance_count)) +
+  geom_boxplot(fill = "skyblue", color = "black", outlier.color = "red", outlier.shape = 16, size = 1) +
+  ggtitle("Spikes Distribution Across Sessions") +
+  xlab("Session ID") +
+  ylab("Spike Count") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 16, face = "bold"),
+    axis.title.x = element_text(size = 14, face = "bold"),  
+    axis.title.y = element_text(size = 14, face = "bold"),  
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),
+    axis.text.y = element_text(size = 12), 
+    panel.grid.major = element_line(color = "gray80"),  
+    panel.grid.minor = element_blank()
+  )
+# violin plot
+ggplot(df_sorted, aes(x = factor(session_id), y = appearance_count, fill = factor(session_id))) +
+  geom_violin(trim = FALSE, alpha = 0.6, scale = "width", color = "black") + 
+  geom_boxplot(width = 0.1, fill = "white", color = "black", outlier.shape = 16, outlier.size = 2, alpha = 0.7) +  # Boxplot
+  ggtitle("Spikes Distribution Across Sessions") +
+  xlab("Session ID") +
+  ylab("Spike Count") +
+  scale_fill_viridis_d(option = "plasma") +  
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 16, face = "bold"),  
+    axis.title.x = element_text(size = 14, face = "bold"), 
+    axis.title.y = element_text(size = 14, face = "bold"),  
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  
+    axis.text.y = element_text(size = 12), 
+    legend.position = "none"  
+  )
+
+```
+The Spike distribution is different across the sessions, which means the spike count could be a factor affecting the feedback type, so we need to calculate the spike ratio as a important feature for the prediction model.
+
+
+
+```{r, echo=FALSE, message=FALSE,warning=FALSE}
+
+library(tidyverse)
+
+# Initialize an empty tibble for all trials
+trials.all <- tibble(
+  mouse_name = character(),
+  contrast_left = numeric(),
+  contrast_right = numeric(),
+  feedback_type = numeric(),
+  session_id = numeric()
+)
+
+# Loop through all 18 sessions
+for (i in 1:18) {
+  tmp <- session[[i]]
+  n.trials <- length(tmp$feedback_type)
+  
+  trials <- tibble(
+    mouse_name = rep(tmp$mouse_name, n.trials),
+    contrast_left = tmp$contrast_left,
+    contrast_right = tmp$contrast_right,
+    feedback_type = tmp$feedback_type,
+    session_id = rep(i, n.trials)
+  )
+  
+  trials.all <- bind_rows(trials.all, trials)  # Efficient row binding
+}
+
+# Function to calculate total spikes and spike ratio per trial
+calculate_spikes_info <- function(session, session_id) {
+  total_neurons <- nrow(session$spks[[1]])  # Total number of neurons in the session (from first trial)
+  num_trials <- length(session$spks)  # Number of trials in session
+
+  # Initialize vectors
+  total_spikes <- numeric(num_trials)
+  spike_ratios <- numeric(num_trials)
+
+  # Loop through each trial
+  for (i in 1:num_trials) {
+    if (!is.null(session$spks[[i]]) && length(session$spks[[i]]) > 0) {
+      total_spikes[i] <- sum(session$spks[[i]])  # Sum all elements in the spks matrix
+      spike_ratios[i] <- total_spikes[i] / total_neurons  # Calculate spike ratio
+    } else {
+      total_spikes[i] <- NA
+      spike_ratios[i] <- NA
+    }
+  }
+
+  # Create a data frame for the session
+  df <- data.frame(
+    session_id = session_id,
+    trial_id = 1:num_trials,
+    total_neurons = total_neurons,
+    total_spikes = total_spikes,
+    spike_ratio = spike_ratios
+  )
+  
+  return(df)
+}
+
+# Loop through all sessions and calculate total spikes & spike ratio per trial
+spike_data_df <- do.call(rbind, lapply(1:length(session), function(i) {
+  calculate_spikes_info(session[[i]], i)
+}))
+
+library(dplyr)  # For data manipulation
+
+# Step 1: Count the Number of Unique Brain Areas Per Session
+session_brain_area_count <- lapply(1:length(session), function(i) {
+  if (!is.null(session[[i]]$brain_area)) {
+    num_categories <- length(unique(unlist(strsplit(session[[i]]$brain_area, " "))))  # Count unique brain areas
+    return(data.frame(session_id = i, num_brain_areas = num_categories))
+  } else {
+    return(data.frame(session_id = i, num_brain_areas = NA))
+  }
+}) %>% bind_rows()
+
+# Step 2: Compute Max/Min Spike Count Per Session
+session_spike_stats <- spike_data_df %>%
+  group_by(session_id) %>%
+  summarise(
+    session_spike_max = max(total_spikes, na.rm = TRUE),
+    session_spike_min = min(total_spikes, na.rm = TRUE)
+  )
+
+# Step 3: Merge the new information into `spike_data_df`
+spike_data_df <- spike_data_df %>%
+  left_join(session_brain_area_count, by = "session_id") %>%
+  left_join(session_spike_stats, by = "session_id")
+
+
+  
+
+```
+
+
+### Extract information of occurence of each brain area of each trail(Y or N)
+```{r, echo=FALSE, message=FALSE,warning=FALSE}
+# Load necessary library
+library(dplyr)
+
+# Assuming 'session' is the loaded list containing session information
+construct_dataframe <- function(session) {
+  if (!is.list(session)) {
+    stop("Error: 'session' is not a list. Check the input data.")
+  }
+  
+  all_sessions <- list()
+  
+  for (session_idx in seq_along(session)) {
+    session_data <- session[[session_idx]]
+    
+    if (!is.list(session_data) || !("brain_area" %in% names(session_data)) || !("spks" %in% names(session_data))) {
+      next  # Skip invalid session entries
+    }
+    
+    brain_areas <- unique(session_data[["brain_area"]])  # Extract unique brain areas
+    trials <- length(session_data[["spks"]])  # Number of trials
+    
+    brain_matrix <- matrix(0, nrow = trials, ncol = length(brain_areas))
+    colnames(brain_matrix) <- brain_areas
+    
+    for (trial_idx in seq_len(trials)) {
+      spks_trial <- session_data[["spks"]][[trial_idx]]  # 734 x 40 matrix
+      active_areas <- unique(session_data[["brain_area"]][rowSums(spks_trial) > 0])
+      
+      brain_matrix[trial_idx, brain_areas %in% active_areas] <- 1
+    }
+    
+    session_df <- data.frame(
+      session = rep(session_idx, trials),
+      trial = seq_len(trials),
+      brain_matrix
+    )
+    
+    all_sessions[[session_idx]] <- session_df
+  }
+  
+  final_df <- bind_rows(all_sessions)
+  return(final_df)
+}
+
+
+
+# Example usage:
+result_df <- construct_dataframe(session)
+result_df[is.na(result_df)] <- 0
+result_df[,1]<-c()
+result_df[,1]<-c()
+head(result_df)
+```
+After doing the distributions, we also consider the effect of brain area in each trail for detailed. That is because the occurence of the some brain areas for a mice(like Cori) might appear in another mice(such as root in Hench)
+
+
+
+
+## Time Series
+
+---
+Follow the question we talked about in comparison of changes of Neurons, we would like to extract the time series data to see how the neuron activity changes over time, extracting AR1 as the time coefficient for session 1, extract how much the current neuron spike count depends on the previous one.
+```{r, echo=FALSE, message=FALSE,warning=FALSE}
+# Load required libraries
+library(forecast)
+library(dplyr)
+library(ggplot2)
+
+# Assuming `sessions` is already loaded in your workspace
+session_1 <- sessions[[1]]  # Extract the first session
+
+# Extract relevant data
+time_data <- session_1$time    # Time points for each trial
+neuron_data <- session_1$spks  # Neural spiking data
+feedback_data <- session_1$feedback_type  # Feedback per trial
+
+# Initialize dataframe to store coefficients
+time_coeff_df <- data.frame(
+  Trial = 1:length(time_data),
+  Time_Coefficient_Feedback_1 = rep(0, length(time_data)),  # Default to 0
+  Time_Coefficient_Feedback_neg1 = rep(0, length(time_data)) # Default to 0
+)
+
+# Loop through trials to compute AR(1) coefficients
+for (t in 1:length(time_data)) {
+  tryCatch({
+    trial_time_series <- as.numeric(neuron_data[[t]])  
+    trial_time_points <- as.numeric(time_data[[t]])  
+
+    if (length(trial_time_series) >= 3) {  # Ensure enough data points
+      
+      # Standardize neuron activity
+      trial_time_series <- scale(trial_time_series)
+      
+      # Fit ARIMA(1,0,0)
+      arima_model <- Arima(trial_time_series, order = c(1,0,0))
+      
+      # Extract AR(1) coefficient
+      ar_coef <- coef(arima_model)["ar1"]
+    } else {
+      ar_coef <- 0  # Set NA values to 0
+    }
+
+    # Store results based on feedback type
+    if (feedback_data[t] == 1) {
+      time_coeff_df$Time_Coefficient_Feedback_1[t] <- ifelse(is.na(ar_coef), 0, ar_coef)
+    } else if (feedback_data[t] == -1) {
+      time_coeff_df$Time_Coefficient_Feedback_neg1[t] <- ifelse(is.na(ar_coef), 0, ar_coef)
+    }
+    
+  }, error = function(e) {
+    time_coeff_df$Time_Coefficient_Feedback_1[t] <- 0
+    time_coeff_df$Time_Coefficient_Feedback_neg1[t] <- 0
+  })
+}
+
+# Convert data to long format for plotting
+time_coeff_long <- time_coeff_df %>%
+  pivot_longer(cols = c(Time_Coefficient_Feedback_1, Time_Coefficient_Feedback_neg1),
+               names_to = "Feedback_Type", values_to = "Time_Coefficient") %>%
+  mutate(Feedback_Type = ifelse(Feedback_Type == "Time_Coefficient_Feedback_1", "Feedback = 1", "Feedback = -1"))
+
+# Plot Feedback = 1 separately
+pf1<-ggplot(filter(time_coeff_long, Feedback_Type == "Feedback = 1"), aes(x = Trial, y = Time_Coefficient)) +
+  geom_line(color = "blue") +
+  geom_point(color = "blue") +
+  ggtitle("Time Coefficient Evolution for Feedback = 1") +
+  xlab("Trial") + ylab("Time Coefficient (AR1)") +
+  theme_minimal()
+
+# Plot Feedback = -1 separately
+pf2<-ggplot(filter(time_coeff_long, Feedback_Type == "Feedback = -1"), aes(x = Trial, y = Time_Coefficient)) +
+  geom_line(color = "red") +
+  geom_point(color = "red") +
+  ggtitle("Time Coefficient Evolution for Feedback = -1") +
+  xlab("Trial") + ylab("Time Coefficient (AR1)") +
+  theme_minimal()
+
+library(gridExtra)
+grid.arrange(pf1, pf2, nrow = 2)
+# Display extracted coefficients
+print(head(time_coeff_df, 10))
+
+```
+
+
+### Note:
+The time coefficient in this plot represents the AR(1) value from an ARIMA(1,0,0) model fitted to each trial's neural activity.
+### Analysis:
+Since the Time_coefficient(AR(1))is not high, there is more random neuron spikes in the first session(low memory effect), the plots displays that AR(1) fluctuates a lot over time, which means neuron responses might be influenced by other external factors (stimuli.etc).
+
+
+
+## Part 2. Data integration. 
+Using the findings in Part 1, we will propose an approach to combine data across trials by (i) extracting the shared patterns across sessions and/or (ii) addressing the differences between sessions. The goal of this part is to enable the borrowing of information across sessions to enhance the prediction performance in Part 3.
+
+### load all sessions time coefficient, construct the final dataframe for data integration
+```{r, echo=FALSE, message=FALSE,warning=FALSE}
+Time_coef<-read.csv("C:\\Users\\Administrator\\Desktop\\STA 141 A retake\\project\\all_sessions_time_coefficients.csv")
+time_coeff_data<-Time_coef
+session_ids <- unique(time_coeff_data$Session)
+time_coeff_data$Feedback_time=time_coeff_data$Time_Coefficient_Feedback_1+time_coeff_data$Time_Coefficient_Feedback_neg1
+# View updated dataframe
+#remove time series because overfitting
+Time_coef<-time_coeff_data%>%
+  select(Feedback_time)
+Model_df<- mutate(trials.all,spike_data_df,result_df,Time_coef)
+head(Model_df)
+```
+
+
+### Extract important features after hyperparameter tuning
+```{r, echo=FALSE, message=FALSE,warning=FALSE}
+
+#load dataframe after hyperparameter tuning with 5 times
+importance_df<-read.csv("C:\\Users\\Administrator\\Desktop\\STA 141 A retake\\project\\dataset\\parameter_importance_ranking.csv")
+# Filter parameters with importance > 1
+high_importance_params <- importance_df[importance_df$Importance > 1, ]
+high_importance_params <- high_importance_params[order(high_importance_params$Importance, decreasing = TRUE), ]
+
+# Get the parameter names
+high_importance_param_names <- high_importance_params$Parameter
+print(paste("Number of parameters with importance > 1:", length(high_importance_param_names)))
+print(high_importance_param_names)
+```
+
+
+
+
+
+
+### Diagonistics
+```{r, echo=FALSE, message=FALSE,warning=FALSE}
+library(caret)
+# Build a new model using these explicitly defined parameters
+set.seed(123)
+##select 4 parameters with optimal result
+high_importance_params <- high_importance_params <- c(
+  "Feedback_time", "total_spikes", "spike_ratio", "contrast_right", "contrast_left",
+  "session_spike_min", "session_spike_max", "total_neurons", "num_brain_areas",
+  "mouse_name", "LSr", "root", "MOs", "PL", "VISp", "CA3", "VISl", "ACA", 
+  "POST", "DG"
+)
+
+
+#Check collinarity
+
+
+#standardize data
+df_model <- Model_df %>%
+  mutate(across(where(is.numeric) & !c(session_id, trial_id,feedback_type), scale))
+
+
+Model_glm<- df_model
+Model_glm<-Model_glm%>%select(-session_id,-trial_id)
+Model_glm$feedback_type= (Model_glm$feedback_type+1)/2
+glm_model <- glm(as.numeric(feedback_type) ~ ., 
+                  data = Model_glm, 
+                   family = binomial())
+
+# 1. Residuals vs Fitted plot
+plot(glm_model, which = 1, main = "Residuals vs Fitted")
+
+# 2. QQ plot of residuals
+plot(glm_model, which = 2, main = "QQ Plot")
+
+
+
+
+
+
+
+Model_subset <- df_model[, c("feedback_type", high_importance_params)]
+#summary(glm_model)
+
+#split training and tesing dataset
+Model_subset$feedback_type <- as.factor(Model_subset$feedback_type)
+set.seed(123)
+train_indices <- createDataPartition(Model_subset$feedback_type, p = 0.8, list = FALSE)
+train_data <- Model_subset[train_indices, ]
+test_data <- Model_subset[-train_indices, ]
+
+```
+
+The residuals vs. fitted plot and the normal QQ plot displays that the data is not accurately centered(since there is a strong deviation from 0 to 5, which means the model has biased prediction ). But the residuals are closer to the regression line as the value decreased. We can observe three outliers:2761,2807,2729. Therefore, the logistic regression model are no longer fitted in this case. So, we need have attempt on Random Forest Model.
+
+
+
+### Model training performance
+```{r, echo=FALSE, message=FALSE,warning=FALSE}
+library(randomForest)
+set.seed(123)
+rf_model <- randomForest(
+  formula = feedback_type ~ .,
+  data = train_data,
+  mtry = 4,
+  ntree = 900,
+  importance = TRUE
+)
+
+print(rf_model)
+print(high_importance_params)
+```
+After hyperparameter tuning, the best fitted Random Forest model is trained with 900 trees and 4 variables randomly sampled as candidates at each split. The model is trained with the 80% training dataset and the importance of each parameter is calculated. We finally randomly select 4 parameters in the high_importance_params list to construct the final model. Finally, after training, the OOB error rate is 27.45%, which is well-performed in training.
+
+
+### Analysis of the model with 20% test dataset split from original data
+```{r, echo=FALSE, message=FALSE,warning=FALSE}
+library(pROC)
+
+test_predictions <- predict(rf_model, test_data)
+
+# Calculate accuracy
+test_accuracy <- sum(test_predictions == test_data$feedback_type) / nrow(test_data)
+print(paste("Test accuracy:", round(test_accuracy * 100, 2), "%"))
+
+# Create confusion matrix
+conf_table <- table(Actual = test_data$feedback_type, Predicted = test_predictions)
+print("Confusion Matrix:")
+print(conf_table)
+prob_predictions <- predict(rf_model, test_data, type = "prob")
+
+# Check number of classes
+num_classes <- length(levels(test_data$feedback_type))
+positive_class <- levels(test_data$feedback_type)[2]
+roc_obj <- roc(test_data$feedback_type, prob_predictions[, positive_class])
+auc_value <- auc(roc_obj)
+  
+  # Plot the ROC curve
+plot(roc_obj, main = paste("ROC Curve (AUC =", round(auc_value, 4), ")"),
+       col = "blue", lwd = 2)
+
+  
+print(paste("AUC:", round(auc_value, 4)))
+```
+The test accuracy is 74.58%(The model correctly predicts the class in 74.58% of cases.), which is a good performance in the test dataset. The confusion matrix displays that the model has a good performance in predicting the feedback type. The AUC value is 0.7475, which indicates a fair to good ability of the model. 
+
+
+
+
+
+### Analysis of the performance in Instructor's test data
+```{r, echo=FALSE, message=FALSE,warning=FALSE}
+#Test with Instructor's test data
+Model_df_sub<-df_model[df_model$session_id %in% c(1, 2), ]
+filtered_test_data <- Model_df_sub[, c("feedback_type", high_importance_params)]
+filtered_test_data$feedback_type <- as.factor(filtered_test_data$feedback_type)
+filtered_predictions <- predict(rf_model, filtered_test_data)
+filtered_prob_predictions <- predict(rf_model, filtered_test_data, type = "prob")
+
+# Create confusion table for the filtered test data
+filtered_conf_table <- table(Actual = filtered_test_data$feedback_type, Predicted = filtered_predictions)
+print("Confusion Matrix (Sessions 1 and 2):")
+print(filtered_conf_table)
+
+# Calculate accuracy
+filtered_accuracy <- sum(filtered_predictions == filtered_test_data$feedback_type) / nrow(filtered_test_data)
+print(paste("Test accuracy (Sessions 1 and 2):", round(filtered_accuracy * 100, 2), "%"))
+
+
+
+num_classes <- length(levels(filtered_test_data$feedback_type))
+ # Binary classification
+  positive_class <- levels(filtered_test_data$feedback_type)[2]
+  filtered_roc_obj <- roc(filtered_test_data$feedback_type, filtered_prob_predictions[, positive_class])
+  filtered_auc_value <- auc(filtered_roc_obj)
+  
+  # Plot the ROC curve
+  plot(filtered_roc_obj, main = paste("ROC Curve - Sessions 1&2 (AUC =", round(filtered_auc_value, 4), ")"),
+       col = "blue", lwd = 2)
+  print(paste("AUC (Sessions 1 and 2):", round(filtered_auc_value, 4)))
+```
+The test accuracy is 0.8%(The model correctly predicts the class in 80% of cases.), which is a good improvement of our model. The AUC is 0.9234, which indicates that the model has strong ability to predict the values of feedback_type.
+
+
+
+## Discussion
+
+
+After we first construct the predictive model to predict the feedback type of each trial, we found a very good accuracy rate of 74.58%. Suggesting that the model performs very well when we apply our test data(20% from original dataset) to prediction model. After our instructor post the new dataset for prediction, we found that the accuracy rate increased to 80%, indicating that our random forest model has really good performance in test dataset. However, our analysis is not comprehensive enough to cover all relations/interactions in between factors such that we could select better predictors in our model. In the future, we will conduct more analysis between factors in our dataset and discover more useful, valid predictors to improve the accuracy rate of the model. Also, we could consider more advanced models(ex. time series model) to improve the prediction performance.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Appendix
+## what I discovered but not used in the model
+### Changes of Each brain area of Mice Cori in the first trail in session one with respect to time
+```{r, echo=FALSE, message=FALSE,warning=FALSE}
+#the frequency of plot of each brain area in the first session with respect to time
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+#session[[1]]$spks[[1]]
+
+rowsum<-rowSums(session[[1]]$spks[[1]])#total number of neurons in each brain_area in the first trail
+columnsum<-colSums(session[[1]]$spks[[1]])#number of neurons in each time bin
+brain_area<-session[[1]]$brain_area
+session1_summary<-tapply(rowsum,brain_area,sum)
+matrix<-session[[1]]$spks[[1]]
+#access first row of matrix
+df<-data.frame(brain_area,matrix)
+df_grouped <- df %>%
+  group_by(brain_area) %>%
+  summarise(across(everything(), sum, na.rm = TRUE))
+df_grouped<-pivot_longer(df_grouped,cols=-brain_area, names_to = "time", values_to = "number")
+#colnames(df_grouped)[3]<-"number"
+df_grouped_ACA<-df_grouped[df_grouped$brain_area=="ACA",]
+df_grouped_ACA$time<-as.character(1:40)
+df_grouped_MOs<-df_grouped[df_grouped$brain_area=="MOs",]
+df_grouped_MOs$time<-as.character(1:40)
+df_grouped_LS<-df_grouped[df_grouped$brain_area=="LS",]
+df_grouped_LS$time<-as.character(1:40)
+df_grouped_root<-df_grouped[df_grouped$brain_area=="root",]
+df_grouped_root$time<-as.character(1:40)
+df_grouped_VISp<-df_grouped[df_grouped$brain_area=="VISp",]
+df_grouped_VISp$time<-as.character(1:40)
+df_grouped_CA3<-df_grouped[df_grouped$brain_area=="CA3",]
+df_grouped_CA3$time<-as.character(1:40)
+df_grouped_SUB<-df_grouped[df_grouped$brain_area=="SUB",]
+df_grouped_SUB$time<-as.character(1:40)
+df_grouped_DG<-df_grouped[df_grouped$brain_area=="DG",]
+df_grouped_DG$time<-as.character(1:40)
+
+freq_list<-list(df_grouped_ACA,df_grouped_CA3,df_grouped_DG,df_grouped_LS,df_grouped_MOs,df_grouped_root,df_grouped_SUB,
+                df_grouped_VISp)
+
+
+#the summary of neuron activity
+root_summary <- df_grouped_root%>%
+  summarise(
+    mean_activity = mean(number, na.rm = TRUE),  
+    sd_activity  = sd(number, na.rm = TRUE),     
+    max_activity  = max(number, na.rm = TRUE),   
+    min_activity = min(number, na.rm = TRUE)     
+  )
+
+#view neutural activities with line plot
+freq_plot<-function(x){
+  for (i in x){
+  plot<-ggplot(i, aes(x = as.numeric(time), y = number,group = 1)) +
+  geom_line(color = "blue") +
+  geom_point(color = "red") +
+  scale_x_continuous(breaks = seq(1, 40, by = 1)) + 
+  labs(
+    title = paste0("change of ",i$brain_area," across time"),
+    x = "Time",
+    y = "Frequency"
+  ) +
+  theme_minimal()
+  print(plot)
+  }
+}
+
+freq_plot(freq_list)
+
+#view histogram
+histogram_plot<-function(x){
+   for (i in x){
+  plot<-ggplot(i, aes(x = as.numeric(time) ,y=number)) +
+  geom_col(fill = "blue", color = "black", alpha = 0.7) +
+  scale_x_continuous(breaks = seq(1, 40, by = 1)) + 
+  labs(
+    title = paste0("Histogram of ",i$brain_area," across time"),
+    x = "time",
+    y = "frequency"
+  ) +
+  theme_minimal()
+
+  print(plot)
+  }
+}
+
+
+##histogram_plot(freq_list)
+
+#boxplot to view the frequency of each brain area
+df_grouped%>%
+  group_by(time)%>%
+  ggplot(aes(x=brain_area,y=number,fill=brain_area))+
+  geom_boxplot()+
+  theme_minimal()
+```
+
+
+### The Mean&Variance of Brain Area Activity Across Sessions
+```{r, echo=FALSE, message=FALSE,warning=FALSE}
+library(ggplot2)
+
+
+
+shared_patterns <- df_brain_counts %>%
+  group_by(brain_area) %>%
+  summarise(avg_appearance = mean(appearance_count), .groups = "drop") %>%
+  arrange(desc(avg_appearance))
+
+
+head(shared_patterns)
+
+
+session_variability <- df_brain_counts %>%
+  group_by(brain_area) %>%
+  summarise(var_appearance = var(appearance_count), .groups = "drop") %>%
+  arrange(desc(var_appearance))
+
+
+head(session_variability)
+
+
+ggplot(shared_patterns, aes(x = reorder(brain_area, -avg_appearance), y = avg_appearance)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  ggtitle("Average Brain Area Activity Across Sessions") +
+  xlab("Brain Area") +
+  ylab("Average Appearance Count") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+
+ggplot(session_variability, aes(x = reorder(brain_area, -var_appearance), y = var_appearance)) +
+  geom_bar(stat = "identity", fill = "red") +
+  ggtitle("Variability in Brain Area Activity Across Sessions") +
+  xlab("Brain Area") +
+  ylab("Variance in Appearance Count") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
